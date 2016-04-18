@@ -1,0 +1,25 @@
+rank by wins - losses:
+
+conference winners:
+[('WSH', 30), 
+ ('DAL', 18), 
+
+conference finalists
+ ('STL', 16), 
+ ('PIT', 14),
+
+loose in the second round
+ ('L.A', 14),
+ ('FLA', 12),
+ ('CHI', 12),
+ ('ANA', 10),
+
+loose in the first round
+ ('NYR', 10),
+ ('T.B', 10),
+ ('S.J', 10),
+ ('NYI', 8),
+ ('NSH', 0),
+ ('PHI', 0),
+ ('DET', 0),
+ ('MIN', -6)]
