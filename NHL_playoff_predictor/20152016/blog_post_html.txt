@@ -1,0 +1,169 @@
+In this post we'll look at an algorithm that predicts the 2016 Stanley Cup Playoffs by generating "power rankings" for each of the 16 competing teams.
+<p style="text-align:center;"><strong>Hypothesis: Teams with the ability to generate longer win streaks and shorter loss streaks, with higher frequency, will have more success in the playoffs.</strong></p>
+The NHL playoffs are particularly long and grueling compared to the other sports. I feel that a key to success is the ability for teams to string together consecutive wins and, on the other hand, consecutive losses can be detrimental. As such, we'll calculate the length and number of regular season win and loss streaks for each playoff team and use them to generate power rankings.
+
+As usual, I'll be using Python 3. The overview is as follows:
+
+Setup:
+<ul>
+	<li>download and import game stats</li>
+	<li>calculate win/loss streaks</li>
+	<li>rank teams using an objective function</li>
+	<li>optimize parameters of objective function</li>
+</ul>
+Prediction:
+<ul>
+	<li>compute power rankings for this years playoff teams</li>
+	<li>compare results to null hypothesis</li>
+</ul>
+&nbsp;
+<h3>Load statistics into Pandas DataFrame</h3>
+The NHL statistics website war-on-ice.com (not affiliated with the NHL) maintains an up-to-date list of game results since the 2005 season, it can be downloaded from <a href="http://war-on-ice.com/gametable.html" target="_blank">this page</a>.
+
+Loading the .csv game-stats file with Pandas:
+
+[code language="python"]
+import pandas as pd
+
+filename = 'war-on-ice-2016-04-12 17-47-47.csv'
+
+# Read into dataframe and set the index values
+# as those in the column named 'Unnamed: 0'
+df = pd.read_csv(filename).set_index('Unnamed: 0')
+[/code]
+
+There is a lot of data in here! For each game we have:
+
+[code language="python"]
+print(df.dtypes)
+[/code]
+<blockquote>season int64
+session object
+gamenumber int64
+gcode int64
+status object
+awayteam object
+hometeam object
+awayscore int64
+homescore int64
+date object
+game.start object
+game.end object
+periods int64
+seconds int64
+awaycorsi int64
+homecorsi int64
+awayafteraway int64
+awayafterhome int64
+homeafteraway int64
+homeafterhome int64</blockquote>
+&nbsp;
+<h3>Functions to calculate win and loss streaks</h3>
+There are many ways to go about determining the win and loss streaks with this data, and we won't go into the details of how I did it but instead concentrate on how the code is structured.
+
+I created a function that searches the dataframe for a team at a given season and fills a list with win/loss information along with the game date. For example
+
+[code language="python"]
+CHI_games = fill_game_list(df, team='CHI', season=20142015)
+print(CHI_games[:2])
+[/code]
+<blockquote>[[Timestamp('2015-06-15 00:00:00'), 1, 0], [Timestamp('2015-06-13 00:00:00'), 1, 0]]</blockquote>
+where each element in the list contains the game date and boolean type variables for a win or loss (in that order).
+
+The function can be found along with the full code in this <a href="https://github.com/agalea91/nhl_war_on_ice_gamesheet/blob/master/NHL_playoff_predictor/20152016/nhl_playoff_predictor_2016.ipynb" target="_blank">ipython notebook</a>. I also built a function that returns a dictionary of streaks as keys corresponding to the frequency of each streak (for a given season) as values. For example
+
+[code language="python"]
+CHI_streaks = get_streaks('win', CHI_games)
+print(CHI_streaks)
+[/code]
+<blockquote>{1: 12, 2: 11, 3: 3, 4: 2, 5: 1, 6: 0, 7: 0, 8: 1}</blockquote>
+This says that Chicago had 12 one-game win streaks, 11 two-game win streaks…etc.
+<h3>Objective function for ranking teams</h3>
+Each team, based on their win and loss streaks in a particular year, will be given a score:
+<p style="text-align:center;">$latex f(\text{team}) = a_1 W_1 + a_2 W_2 + a_3 W_3 + b_1 L_1 + b_2 L_2 + b_3 L_3$,</p>
+where <strong>W1, W2, and W3</strong> are variables for the number of <strong>2, 3 and 4+</strong> game win streaks, respectively, and <strong>L1, L2, L3</strong> are the equivalent variables for loss streaks. Each term has a coefficient that will be optimized, in this study the parameters are taken to be antisymmetric such that
+<p style="text-align:center;">$latex f(\text{team}) = a_1 (W_1-L_1) + a_2 (W_2-L_2) + a_3 (W_3-L_3)$.</p>
+The parameters $latex a_1, a_2, \text{and}~a_3$ will be determined by comparing power rankings to playoff results for the last 4 full seasons. To avoid multiple teams having the same $latex f$ value (i.e., to break ties) a small perturbation is included such that teams with longer win streaks ($latex \text{max}_W$) / shorter loss streaks ($latex \text{max}_L$) get ranked higher. It also depends on the number of times the team reached that streak ($latex N_{\text{max}_W}, N_{\text{max}_L}$). We calculate
+<p style="text-align:center;">$latex f'(\text{team}) = f(\text{team}) + \epsilon~$,</p>
+<p style="text-align:center;">$latex \epsilon = 0.01(\text{max}_W-\text{max}_L) + 0.004(N_{\text{max}_W}-N_{\text{max}_L})~$.</p>
+<h3>Parameter optimization using previous season data</h3>
+The goal here is to evaluate $latex f$ for each playoff team in a given year and for a given set of parameters, and then rank the teams accordingly, where teams with a larger $latex f$ are ranked higher. From the resulting rankings the conference finalists (including which of them won the cup) are predicted along with the bottom 4 teams from each conference (teams that are predicted to lose in the first round). These 10 teams are compared to the actual playoff results and an error value is calculated based on how many matches we have, assigning 3x the weight to matching the first and second place teams properly.
+
+This process was repeated for a range of $latex a_1, a_2, \text{and}~a_3$ parameters varying from $latex 0.5~\text{to}~4.5$ in steps of size $latex 0.25$ and for each of the last 4 full seasons. Recall, these parameters are coefficients on terms with win/loss streak differentials of 2, 3, and 4+ games, respectively. I expected the higher streak differentials to be a more significant predictive factor and therefore anticipated that $latex a_1 &lt; a_2 &lt; a_3$ (for the optimized parameters). As it turns out, the lowest total errors were given by sets of parameters where $latex a_1 &lt; a_3 &lt; a_2$.
+<h3>Power rankings for 2015/2016 playoff teams</h3>
+The optimal parameters were found to be
+<p style="text-align:center;">$latex a_1=2.5, a_2=4.25, \text{and}~a_3=4.0$,</p>
+which results in the 2015/2016 power rankings:
+
+1 - ('WSH', 29.818)
+2 - ('DAL', 28.276)
+3 - ('STL', 19.768)
+4 - ('NYI', 13.266)
+5 - ('S.J', 13.008)
+6 - ('PIT', 9.538)
+7 - ('CHI', 7.588)
+8 - ('NYR', 4.584)
+9 - ('L.A', 6.556)
+10 - ('PHI', 2.242)
+11 - ('ANA', 1.568)
+12 - ('DET', 1.262)
+13 - ('FLA', 0.328)
+14 - ('T.B', -0.692)
+15 - ('NSH', -0.742)
+16 - ('MIN', -5.762)
+
+It doesn't make sense to predict that the bottom 8 teams will lose in the first round because, in this case, we have multiple teams from the same series in this range [1]. Namely: Detroit VS Tampa Bay and Anaheim VS Nashville. We can however, make a projection by re-arranging the list to account for the matchups:
+
+4 - ('WSH', 29.818)
+3 - ('DAL', 28.276)
+
+2 - ('NYI', 13.266)
+2 - ('S.J', 13.008)
+
+1 - ('STL', 19.768)
+1 - ('PIT', 9.538)
+1 - ('ANA', 1.568)
+1 - ('DET', 1.262)
+
+0 - ('CHI', 7.588)
+0 - ('NYR', 4.584)
+0 - ('L.A', 6.556)
+0 - ('PHI', 2.242)
+0 - ('FLA', 0.328)
+0 - ('T.B', -0.692)
+0 - ('NSH', -0.742)
+0 - ('MIN', -5.762)
+
+The number of rounds each team is predicted to make it past is written on the left column; Washington takes the top spot with Dallas coming up just short.
+<h3>Compare to null hypothesis</h3>
+The inspiration for the above rankings is that win/loss streaks can be a predictor of playoff performance. To asses if this is the case, we can rank the teams according to win/loss differentials and compare predictions. For this case we have something very similar, where the win/loss differential is shown for each team:
+
+4 - ('WSH', 30)
+3 - ('DAL', 18)
+
+2 - ('L.A', 14)
+2 - ('FLA', 12)
+
+1 - ('STL', 16)
+1 - ('PIT', 14)
+1 - ('ANA', 10)
+1 - ('T.B', 10)
+
+0 - ('CHI', 12)
+0 - ('NYR', 10)
+0 - ('S.J', 10)
+0 - ('NYI', 8)
+0 - ('NSH', 0)
+0 - ('PHI', 0)
+0 - ('DET', 0)
+0 - ('MIN', -6)
+
+Although the top 2 teams remain the same, the teams that are projected to loose in the third round have changed from the New York Islanders and San Jose Sharks to the Florida Panthers and Los Angeles Kings. The other notable difference is that Tampa bay is now, according to the null hypothesis, predicted to beat Detroit.
+
+We'll have to wait and see what model does a better job – and thus try to infer if streaks are a good predictor of playoff performance.
+
+If you would like to discuss any of the plots or have any questions or corrections then please write a comment, email me at agalea91@gmail.com, or tweet me @agalea91
+
+&nbsp;
+
+[1] – This was also a problem during optimization (i.e., when comparing previous season power rankings to playoff results) and an improved algorithm should account for this, however that would require the re-ranking to be automated.
